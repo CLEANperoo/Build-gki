@@ -1,0 +1,60 @@
+name: Build GKI 12 Kernel with KernelSU
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Upload a Build Artifact
+      uses: actions/upload-artifact@v4.6.2
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git bc bison build-essential curl flex gcc \
+            libssl-dev libncurses-dev libelf-dev libudev-dev libpci-dev \
+            libiberty-dev libzstd-dev python3 unzip openjdk-11-jdk \
+            gcc-aarch64-linux-gnu clang python-is-python3
+
+      - name: Install Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "PATH=\$HOME/bin:\$PATH" >> $GITHUB_ENV
+
+      - name: Init and Sync GKI Kernel Source (Android 12)
+        run: |
+          mkdir -p ~/android/gki
+          cd ~/android/gki
+          ~/bin/repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10
+          ~/bin/repo sync -j2 --force-sync
+
+      - name: Clone KernelSU
+        run: |
+          git clone https://github.com/tiann/KernelSU ~/android/kernelsu
+
+      - name: Integrate KernelSU into Kernel Source
+        run: |
+          cd ~/android/gki/common
+          bash ~/android/kernelsu/kernel/setup.sh
+
+      - name: Build Kernel with KernelSU
+        run: |
+          cd ~/android/gki/common
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=clang
+          make GKI_defconfig
+          ./scripts/config --enable CONFIG_KSU
+          make -j$(nproc)
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: Image.gz-dtb
+          path: ~/android/gki/common/arch/arm64/boot/Image.gz
